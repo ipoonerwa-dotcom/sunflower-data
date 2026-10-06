@@ -1,4 +1,5 @@
-# Rebuilds the SUNFLOWER team performance report on a schedule and publishes it with GitHub Pages.
+# Rebuilds the SUNFLOWER team performance report and publishes it with GitHub Pages, each time
+# cron-job.org starts it (every 10 minutes, through the workflow_dispatch API).
 # The website (sunflower-web-lime.vercel.app) serves it from its own domain through a rewrite in its
 # vercel.json, so members read it wherever they can open the site.
 #
@@ -8,13 +9,12 @@
 name: 更新团队业绩数据
 
 on:
-  schedule:
-    # Every quarter of an hour, off the top of the hour, when GitHub's scheduler is busiest.
-    - cron: "7,22,37,52 * * * *"
+  # Started every 10 minutes by cron-job.org through the API, and by hand from the Actions tab.
+  # Deliberately no `schedule:` -- GitHub's own scheduler runs late, or not at all, when it is busy.
   workflow_dispatch:
 
 permissions:
-  contents: write # the monthly keep-alive commit below
+  contents: read
   pages: write
   id-token: write
 
@@ -84,15 +84,3 @@ jobs:
 
       - id: deployment
         uses: actions/deploy-pages@v4
-
-      # GitHub switches off a public repository's schedule after 60 days without a commit. Nothing
-      # else commits here, so an empty commit once a month keeps it running.
-      - name: 防止定时任务被 GitHub 停用
-        run: |
-          last=$(git log -1 --format=%ct)
-          if [ $(( $(date +%s) - last )) -gt 2592000 ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit --allow-empty -m "keep the schedule alive"
-            git push
-          fi
