@@ -1,0 +1,11 @@
+{
+  "name": "sunflower-data",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "report": "node indexer/index.js"
+  },
+  "dependencies": {
+    "ethers": "6.16.0"
+  }
+}

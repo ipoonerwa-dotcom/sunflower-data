@@ -1,0 +1,98 @@
+# Rebuilds the SUNFLOWER team performance report on a schedule and publishes it with GitHub Pages.
+# The website (sunflower-web-lime.vercel.app) serves it from its own domain through a rewrite in its
+# vercel.json, so members read it wherever they can open the site.
+#
+# A run reads only the blocks that are new since the last one (the cache below), proves the result
+# against on-chain balances, and publishes nothing if that check fails: the previous report stays up.
+
+name: 更新团队业绩数据
+
+on:
+  schedule:
+    # Every quarter of an hour, off the top of the hour, when GitHub's scheduler is busiest.
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write # the monthly keep-alive commit below
+  pages: write
+  id-token: write
+
+# One run at a time: two writing the same cache would only waste requests.
+concurrency:
+  group: update-report
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      RPC_URL: ${{ secrets.RPC_URL }}
+      CACHE_DIR: .cache
+      PRICE_CACHE: .cache/prices.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 检查密钥
+        run: |
+          if [ -z "$RPC_URL" ]; then
+            echo "仓库还没有设置 RPC_URL 密钥：Settings → Secrets and variables → Actions → New repository secret"
+            exit 1
+          fi
+
+      - name: 取回上次读过的链上数据
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache
+          key: chain-${{ github.run_id }}
+          restore-keys: chain-
+
+      - name: 价格缓存打底
+        run: |
+          mkdir -p .cache
+          [ -f .cache/prices.json ] || cp seed/prices.json .cache/prices.json
+
+      - name: 计算业绩
+        run: node indexer/index.js --full out/report-full.json --page site/report.json
+
+      - name: 和链上余额逐个对账（对不上就不发布）
+        run: node tools/reconcile.js out/report-full.json
+
+      - name: 保存链上数据缓存
+        if: always() && hashFiles('.cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .cache
+          key: chain-${{ github.run_id }}
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      # GitHub switches off a public repository's schedule after 60 days without a commit. Nothing
+      # else commits here, so an empty commit once a month keeps it running.
+      - name: 防止定时任务被 GitHub 停用
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt 2592000 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "keep the schedule alive"
+            git push
+          fi
