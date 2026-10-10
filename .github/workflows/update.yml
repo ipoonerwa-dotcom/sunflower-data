@@ -5,6 +5,7 @@
 #
 # A run reads only the blocks that are new since the last one (the cache below), proves the result
 # against on-chain balances, and publishes nothing if that check fails: the previous report stays up.
+# tools/build.sh retries a failed attempt, the last time from scratch, before giving up.
 
 name: 更新团队业绩数据
 
@@ -18,10 +19,13 @@ permissions:
   pages: write
   id-token: write
 
-# One run at a time: two writing the same cache would only waste requests.
+# One run at a time, and a new run replaces whatever is still going. A healthy run takes half a
+# minute, so nothing useful is ever cut short -- but on 2026-10-06 one run hung waiting at the Pages
+# environment gate, and with "wait your turn" every run after it queued behind it and was dropped:
+# three days without an update. Now the next trigger cancels a run that is stuck.
 concurrency:
   group: update-report
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update:
@@ -63,11 +67,8 @@ jobs:
           mkdir -p .cache
           [ -f .cache/prices.json ] || cp seed/prices.json .cache/prices.json
 
-      - name: 计算业绩
-        run: node indexer/index.js --full out/report-full.json --page site/report.json
-
-      - name: 和链上余额逐个对账（对不上就不发布）
-        run: node tools/reconcile.js out/report-full.json
+      - name: 计算业绩并和链上余额逐个对账（不通过会重试，仍不通过就不发布）
+        run: bash tools/build.sh
 
       - name: 保存链上数据缓存
         if: always() && hashFiles('.cache/**') != ''
