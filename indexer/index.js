@@ -335,13 +335,21 @@ function writeJson(file, value, pretty) {
   fs.writeFileSync(file, JSON.stringify(value, asJson, pretty ? 2 : 0));
 }
 
+/**
+ * How far behind the chain's newest block a run reads: about half a minute on BSC. Read exactly at
+ * the tip, 2 of the first 66 scheduled runs failed their own reconciliation. The newest blocks can
+ * still be replaced, and the node's transfer index trails the tip by a moment; a little behind it,
+ * neither can happen.
+ */
+const HEAD_LAG = 64;
+
 async function main() {
   const outputs = outputsFrom(process.argv.slice(2));
   const alchemy = new Alchemy(process.env.RPC_URL);
   // Every read is taken at one block, so the report is a single snapshot that reconcile.js checks at
   // exactly that height. HEAD_BLOCK pins it, which is how an incremental run is compared with a
   // full one.
-  const head = Number(process.env.HEAD_BLOCK) || (await alchemy.blockNumber());
+  const head = Number(process.env.HEAD_BLOCK) || (await alchemy.blockNumber()) - HEAD_LAG;
   const at = "0x" + head.toString(16);
   console.log(`head ${head}`);
   // What earlier runs read. Without it every run starts from the token's first block.
